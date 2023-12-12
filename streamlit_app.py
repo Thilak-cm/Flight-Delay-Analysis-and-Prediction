@@ -14,19 +14,16 @@ def one_hot_encode_columns(X, categorical_columns):
     df_encoded = pd.get_dummies(X, columns=categorical_columns)
     return df_encoded
 
-def estimate_processing_time(num_airports, date_range_days):
-    # You can replace these coefficients with values obtained from your historical data
-    # For simplicity, assuming a linear relationship (you should adjust based on your data)
-    coefficient_airports = 15.29  # Adjust based on your data
-    coefficient_date_range = 2.07  # Adjust based on your data
-    intercept = -15.05  # Adjust based on your data
+def quadratic_estimator(x, a, b, c):
+    return a * x[0] + b * x[1] + c * x[0] * x[1]
 
-    # Calculate estimated time using a linear model
-    estimated_time = (coefficient_airports * num_airports +
-                      coefficient_date_range * date_range_days +
-                      intercept)
+def estimate_processing_time_quadratic(num_airports, date_range_days):
+    a_optimized = -0.7982424463448559
+    b_optimized = -1.7331784299486057
+    c_optimized = 4.841257524103219
 
-    return estimated_time
+    return quadratic_estimator((num_airports, date_range_days), a_optimized, b_optimized, c_optimized)
+
 
 def load_and_preprocess_data(selected_airports, start_date, end_date):
     # API key
@@ -40,11 +37,9 @@ def load_and_preprocess_data(selected_airports, start_date, end_date):
 
     # Loop through each selected airport code
     for airport_code in selected_airports:
-        print(airport_code)
         # Loop through each date within the specified range
         current_date = pd.to_datetime(start_date)
         while current_date <= pd.to_datetime(end_date):
-            print(current_date)
             # Convert the date to the required format
             formatted_date = current_date.strftime('%Y-%m-%d')
 
@@ -199,7 +194,7 @@ def main():
         
         num_airports_input = len(selected_airports)
         date_range_input = (end_date - start_date).days
-        estimated_time = estimate_processing_time(num_airports_input, date_range_input)
+        estimated_time = estimate_processing_time_quadratic(num_airports_input, date_range_input)
         st.sidebar.write(f"Estimated time to generate and display results: {estimated_time:.2f} seconds")
 
         hit_me_button = st.sidebar.button('Run Analysis')
