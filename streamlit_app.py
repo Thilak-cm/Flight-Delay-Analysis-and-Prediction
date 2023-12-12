@@ -1,0 +1,280 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import requests
+import matplotlib.pyplot as plt
+from sklearn.ensemble import RandomForestRegressor
+from datetime import datetime, timedelta
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import plotly.express as px
+
+def one_hot_encode_columns(X, categorical_columns):
+    df_encoded = pd.get_dummies(X, columns=categorical_columns)
+    return df_encoded
+
+def estimate_processing_time(num_airports, date_range_days):
+    # You can replace these coefficients with values obtained from your historical data
+    # For simplicity, assuming a linear relationship (you should adjust based on your data)
+    coefficient_airports = 15.29  # Adjust based on your data
+    coefficient_date_range = 2.07  # Adjust based on your data
+    intercept = -15.05  # Adjust based on your data
+
+    # Calculate estimated time using a linear model
+    estimated_time = (coefficient_airports * num_airports +
+                      coefficient_date_range * date_range_days +
+                      intercept)
+
+    return estimated_time
+
+def load_and_preprocess_data(selected_airports, start_date, end_date):
+    # API key
+    api_key = 'f0ccb5-b175f6'
+
+    # URL template for the API endpoint
+    api_endpoint_template = 'https://aviation-edge.com/v2/public/flightsHistory?key={}&code={}&type=departure&date_from={}&date_to={}'
+
+    # Data list to store information across selected airports and dates
+    data_list = []
+
+    # Loop through each selected airport code
+    for airport_code in selected_airports:
+        print(airport_code)
+        # Loop through each date within the specified range
+        current_date = pd.to_datetime(start_date)
+        while current_date <= pd.to_datetime(end_date):
+            print(current_date)
+            # Convert the date to the required format
+            formatted_date = current_date.strftime('%Y-%m-%d')
+
+            # Construct the API endpoint URL
+            api_endpoint = api_endpoint_template.format(api_key, airport_code, formatted_date, formatted_date)
+
+            # Make a GET request to the API endpoint
+            response = requests.get(api_endpoint)
+
+            # Check if the request was successful (status code 200)
+            if response.status_code == 200:
+                # Parse the JSON data in the response
+                flight_data = response.json()
+
+                # Extract relevant information and append to the data list
+                for flight in flight_data:
+                    data_list.append({
+                        'Type': flight.get('type'),
+                        'Status': flight.get('status'),
+                        'DepartureAirport': flight['departure'].get('iataCode'),
+                        'DepartureIcaoCode': flight['departure'].get('icaoCode'),
+                        'DepartureTerminal': flight['departure'].get('terminal'),
+                        'DepartureGate': flight['departure'].get('gate'),
+                        'DepartureDelay': flight['departure'].get('delay'),
+                        'DepartureScheduledTime': flight['departure'].get('scheduledTime'),
+                        'DepartureEstimatedTime': flight['departure'].get('estimatedTime'),
+                        'DepartureActualTime': flight['departure'].get('actualTime'),
+                        'DepartureEstimatedRunway': flight['departure'].get('estimatedRunway'),
+                        'DepartureActualRunway': flight['departure'].get('actualRunway'),
+                        'ArrivalAirport': flight['arrival'].get('iataCode'),
+                        'ArrivalIcaoCode': flight['arrival'].get('icaoCode'),
+                        'ArrivalBaggage': flight['arrival'].get('baggage'),
+                        'ArrivalGate': flight['arrival'].get('gate'),
+                        'ArrivalScheduledTime': flight['arrival'].get('scheduledTime'),
+                        'ArrivalEstimatedTime': flight['arrival'].get('estimatedTime'),
+                        'AirlineName': flight['airline'].get('name'),
+                        'AirlineIataCode': flight['airline'].get('iataCode'),
+                        'AirlineIcaoCode': flight['airline'].get('icaoCode'),
+                        'FlightNumber': flight['flight'].get('number'),
+                        'FlightIataNumber': flight['flight'].get('iataNumber'),
+                        'FlightIcaoNumber': flight['flight'].get('icaoNumber')
+                    })
+
+            # Increment the date for the next iteration
+            current_date += pd.Timedelta(days=1)
+
+    # Convert the list of dictionaries to a DataFrame
+    df = pd.DataFrame(data_list)
+
+    if not data_list:
+        st.warning("Warning: No data available for the specified date range.")
+        return None, None
+
+    X = df[['Status', 'DepartureAirport', 'DepartureTerminal', 'DepartureGate', 'DepartureScheduledTime', 'DepartureEstimatedTime', 'DepartureEstimatedRunway', 'DepartureActualRunway', 'ArrivalAirport', 'AirlineName', 'FlightNumber', 'DepartureDelay']]
+
+    X['DepartureEstimatedTime'] = pd.to_datetime(X['DepartureEstimatedTime'], format='%Y-%m-%dt%H:%M:%S.%f')
+    X['DepartureScheduledTime'] = pd.to_datetime(X['DepartureScheduledTime'], format='%Y-%m-%dt%H:%M:%S.%f')
+    X['DepartureEstimatedRunway'] = pd.to_datetime(X['DepartureEstimatedRunway'], format='%Y-%m-%dt%H:%M:%S.%f')
+    X['DepartureActualRunway'] = pd.to_datetime(X['DepartureActualRunway'], format='%Y-%m-%dt%H:%M:%S.%f')
+
+    X['Flight_Date'] = X['DepartureEstimatedTime'].dt.date
+    X['DepartureEstimatedTime'] = X['DepartureEstimatedTime'].dt.time
+    X['DepartureScheduledTime'] = X['DepartureScheduledTime'].dt.time
+    X['DepartureEstimatedRunway'] = X['DepartureEstimatedRunway'].dt.time
+    X['DepartureActualRunway'] = X['DepartureActualRunway'].dt.time
+
+
+    categorical_columns = ['Status', 'DepartureAirport', 'DepartureTerminal', 'DepartureGate', 'ArrivalAirport', 'AirlineName']
+    X_encoded = one_hot_encode_columns(X, categorical_columns)
+
+    X_encoded.dropna(inplace=True)
+
+    X_encoded['DepartureScheduledTimeHour'] = X_encoded['DepartureScheduledTime'].apply(lambda x: x.hour)
+    X_encoded['DepartureScheduledTimeMinutes'] = X_encoded['DepartureScheduledTime'].apply(lambda x: x.minute)
+    X_encoded['DepartureEstimatedTimeHour'] = X_encoded['DepartureEstimatedTime'].apply(lambda x: x.hour)
+    X_encoded['DepartureEstimatedTimeMinutes'] = X_encoded['DepartureEstimatedTime'].apply(lambda x: x.minute)
+    X_encoded['DepartureEstimatedRunwayHour'] = X_encoded['DepartureEstimatedRunway'].apply(lambda x: x.hour)
+    X_encoded['DepartureEstimatedRunwayMinutes'] = X_encoded['DepartureEstimatedRunway'].apply(lambda x: x.minute)
+    X_encoded['DepartureActualRunwayHour'] = X_encoded['DepartureActualRunway'].apply(lambda x: x.hour)
+    X_encoded['DepartureActualRunwayMinutes'] = X_encoded['DepartureActualRunway'].apply(lambda x: x.minute)
+    X_encoded['Flight_Date_Year'] = X_encoded['Flight_Date'].apply(lambda x: x.year)
+    X_encoded['Flight_Date_Month'] = X_encoded['Flight_Date'].apply(lambda x: x.month)
+    X_encoded['Flight_Date_Day'] = X_encoded['Flight_Date'].apply(lambda x: x.day)
+
+    X_encoded.drop(['DepartureScheduledTime', 'DepartureEstimatedTime', 'DepartureEstimatedRunway', 'DepartureActualRunway', 'Flight_Date'], axis=1, inplace=True)
+
+    return X_encoded, X
+
+def train_and_evaluate_model(regressor, X_train, X_test, y_train, y_test):
+    regressor.fit(X_train, y_train)
+
+    y_pred = regressor.predict(X_test)
+
+    # sns.scatterplot(x=y_pred, y=y_test)
+
+    # Evaluate the model
+    mse = mean_squared_error(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+
+    print("Mean Squared Error (MSE): {:.2f}".format(mse))
+    print("Mean Absolute Error (MAE): {:.2f}".format(mae))
+    print("R-squared (R2): {:.2f}".format(r2))
+
+    return regressor, mse, mae, r2
+
+def make_predictions(regressor, X_test, y_test):
+    # Make predictions
+    y_pred = regressor.predict(X_test)
+
+    # Display a scatter plot of predicted vs actual delays
+    fig, ax = plt.subplots()
+    sns.scatterplot(x=y_pred, y=y_test, ax=ax)
+
+    # Customize the plot
+    ax.set_xlabel("Predicted Delays")
+    ax.set_ylabel("Actual Delays")
+
+    st.subheader("Predictions vs Actual Delays:")
+    st.pyplot(fig)
+
+# Streamlit App
+def main():
+    st.set_page_config(
+    page_title="Flight Delay Prediction",
+    layout="wide",
+    initial_sidebar_state="expanded",  # Expand the sidebar by default
+)
+    st.image('airportaerial.jpg')
+    st.markdown("***")
+    st.sidebar.title("Flight Delay Analysis & Prediction App")
+    st.sidebar.markdown("***")
+    st.sidebar.write(
+            """
+            ### Airport Codes:
+            - :airplane: **DXB:** Dubai International Airport
+            - :airplane: **LAS:** Harry Reid International Airport Los Angeles
+            - :airplane: **ATL:** Hartsfield-Jackson Atlanta International Airport
+            - :airplane: **DFW:** Dallas/Fort Worth International Airport
+            - :airplane: **ORD:** O'Hare International Airport
+            """
+        )
+    selected_page = st.sidebar.radio("Select Page", ["Analysis", "Prediction"])
+    if selected_page == "Analysis":
+
+        col1, col2 = st.columns(2)
+        st.sidebar.write("***Please note:*** the API data has a three-day delay. Dates within the last three days are not available. If you're interested in predictive analysis for future dates, kindly switch to the Predictive Plots page using the options above.")
+        st.sidebar.subheader("Input Controls:")
+        selected_airports = st.sidebar.multiselect("Select Airports (among world's top 5 airports):", ['dxb', 'las', 'atl', 'dfw', 'ord'], default=['dxb'])
+
+        # Select date range using sliders
+        with col1:
+            start_date = st.sidebar.date_input("Select Start Date:", pd.to_datetime('2023-11-01'))
+        with col2:
+            end_date = st.sidebar.date_input("Select End Date:", pd.to_datetime('2023-11-03'))
+        
+        num_airports_input = len(selected_airports)
+        date_range_input = (end_date - start_date).days
+        estimated_time = estimate_processing_time(num_airports_input, date_range_input)
+        st.sidebar.write(f"Estimated time to generate and display results: {estimated_time:.2f} seconds")
+
+        hit_me_button = st.sidebar.button('Run Analysis')
+
+        if hit_me_button:
+            with st.spinner('Pulling data from API...'):
+                # Load and preprocess the data
+                df, df_X = load_and_preprocess_data(selected_airports, start_date, end_date)
+                # Display a sample of the dataset
+                st.subheader("Sample of the Dataset:")
+                st.dataframe(df_X.head())
+
+            with st.spinner('Loading analysis...'):
+                # Train and evaluate the model
+                X, y = df.drop('DepartureDelay', axis=1), df['DepartureDelay']
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+
+                rf = RandomForestRegressor()
+                rf_trained_model, mse, mae, r2 = train_and_evaluate_model(rf, X_train, X_test, y_train, y_test)
+
+                # Display model evaluation metrics
+                st.subheader("Model Evaluation Metrics:")
+                st.write("Mean Squared Error (MSE): {:.2f}".format(mse))
+                st.write("Mean Absolute Error (MAE): {:.2f}".format(mae))
+                st.write("R-squared (R2): {:.2f}".format(r2))
+
+                # Make predictions and display results
+                # st.subheader("Predictions:")
+                make_predictions(rf_trained_model, X_test, y_test)
+
+                mean_delays = df_X.groupby(['Flight_Date', 'DepartureAirport'])['DepartureDelay'].median().reset_index()
+
+                # Plot the median delays using Plotly Express
+                fig = px.line(mean_delays, x='Flight_Date', y='DepartureDelay', color='DepartureAirport')
+                fig.update_xaxes(title_text='Flight Date')
+                fig.update_yaxes(title_text='Median Departure Delay (minutes)')
+
+                st.subheader("Median Departure Delays Over Time for Each Airport:")
+                st.plotly_chart(fig)
+
+                mean_delays = df_X.groupby(['Flight_Date', 'DepartureAirport'])['DepartureDelay'].max().reset_index()
+
+                # Plot the maximum delays using Plotly Express
+                fig = px.line(mean_delays, x='Flight_Date', y='DepartureDelay', color='DepartureAirport')
+                fig.update_xaxes(title_text='Flight Date')
+                fig.update_yaxes(title_text='Maximum Departure Delay (minutes)')
+
+                st.subheader("Maximum Departure Delays Over Time for Each Airport:")
+                st.plotly_chart(fig)
+
+    if selected_page == 'Prediction':
+        st.sidebar.subheader("Input Controls for Prediction:")
+        selected_airport = st.sidebar.multiselect("Select One Airport:", ['dxb', 'las', 'atl', 'dfw', 'ord'])
+        prediction_date = st.sidebar.date_input("Select Prediction Date:", pd.to_datetime('2023-11-10'))
+        hit_me_button2 = st.sidebar.button('Run Prediction')
+        if hit_me_button2:
+            with st.spinner('Running prediction...'):
+                current_datetime = datetime.now()
+                five_days_ago = current_datetime - timedelta(days=3)
+                six_days_ago = current_datetime - timedelta(days=4)
+                
+                df, df_X = load_and_preprocess_data(selected_airport, six_days_ago, five_days_ago)
+                rf = RandomForestRegressor()
+                X, y = df.drop('DepartureDelay', axis=1), df['DepartureDelay']
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+                rf_trained_model, mse, mae, r2 = train_and_evaluate_model(rf, X_train, X_test, y_train, y_test)
+                predictions = rf_trained_model.predict(df.drop('DepartureDelay', axis=1))
+                for i in selected_airport:
+                    st.subheader(f'Delay predicted for {i}:')
+                    st.write(f'{predictions.mean():.0f} minutes')
+
+
+if __name__ == '__main__':
+    main()
