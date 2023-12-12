@@ -251,24 +251,69 @@ def main():
     if selected_page == 'Prediction':
         st.sidebar.subheader("Input Controls for Prediction:")
         selected_airport = st.sidebar.multiselect("Select One Airport:", ['dxb', 'las', 'atl', 'dfw', 'ord'])
-        prediction_date = st.sidebar.date_input("Select Prediction Date: (can be a future date!)", pd.to_datetime('2023-11-10'))
+        prediction_date = st.sidebar.date_input("Select Prediction Date: (if it's a past date, you get a comparison analysis!)", pd.to_datetime('2023-11-10'))
         hit_me_button2 = st.sidebar.button('Run Prediction')
         if hit_me_button2:
             with st.spinner('Running prediction...'):
                 current_datetime = datetime.now()
-                four_days_ago = current_datetime - timedelta(days=4)
-                five_days_ago = current_datetime - timedelta(days=5)
                 
-                df, df_X = load_and_preprocess_data(selected_airport, five_days_ago, four_days_ago)
-                rf = RandomForestRegressor()
-                X, y = df.drop('DepartureDelay', axis=1), df['DepartureDelay']
-                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
-                rf_trained_model, mse, mae, r2 = train_and_evaluate_model(rf, X_train, X_test, y_train, y_test)
-                predictions = rf_trained_model.predict(df.drop('DepartureDelay', axis=1))
-                for i in selected_airport:
-                    st.subheader(f'Delay predicted for {i} on {prediction_date}:')
-                    st.write(f'{predictions.mean():.0f} minutes')
+                if prediction_date <= current_datetime.date():
+                    df, df_X = load_and_preprocess_data(selected_airport, prediction_date, prediction_date)
+                    rf = RandomForestRegressor()
+                    X, y = df.drop('DepartureDelay', axis=1), df['DepartureDelay']
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+                    rf_trained_model, mse, mae, r2 = train_and_evaluate_model(rf, X_train, X_test, y_train, y_test)
+                    predictions = rf_trained_model.predict(df.drop('DepartureDelay', axis=1))
 
+                    for i in selected_airport:
+                        st.subheader(f'Predicted Delay for {i} on {prediction_date}:')
+                        st.write(f'{predictions.mean():.0f} minutes')
+
+                    # Get the actual delays for the specified date
+                    actual_delays = df_X[df_X['Flight_Date'] == prediction_date]['DepartureDelay'].tolist()
+
+                    # Display the ground truth delays
+                    st.subheader(f'Actual Delays for {i} on {prediction_date}:')
+                    median_actual_delay = np.nanmedian(actual_delays)
+                    st.write(f'Ground Truth Delays: {median_actual_delay}')
+
+                    st.subheader('Comparison:')
+                    st.write(f'Predicted Delay: {predictions.mean():.0f} minutes')
+                    st.write(f'Actual Delay: {median_actual_delay:.0f} minutes')
+
+                    # Plotting the comparison
+                    pastel_colors = ['#FFB6C1', '#87CEFA']
+                    labels = ['Predicted Delay', 'Actual Delay']
+                    values = [round(predictions.mean(),0), median_actual_delay]
+
+                    fig, ax = plt.subplots()
+                    bars = ax.bar(labels, values, color=pastel_colors)
+
+                    # Adding labels and title
+                    ax.set_ylabel('Delay (minutes)')
+                    ax.set_title('Comparison of Predicted and Actual Delays')
+
+                    # Adding text labels on top of the bars
+                    for bar in bars:
+                        yval = bar.get_height()
+                        plt.text(bar.get_x() + bar.get_width() / 2, yval, round(yval, 2), ha='center', va='bottom')
+
+                    # Display the plot in Streamlit
+                    st.pyplot(fig)
+
+                else:
+                    four_days_ago = current_datetime - timedelta(days=4)
+                    five_days_ago = current_datetime - timedelta(days=5)
+                    df, df_X = load_and_preprocess_data(selected_airport, five_days_ago, four_days_ago)
+                    rf = RandomForestRegressor()
+                    X, y = df.drop('DepartureDelay', axis=1), df['DepartureDelay']
+                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+                    rf_trained_model, mse, mae, r2 = train_and_evaluate_model(rf, X_train, X_test, y_train, y_test)
+                    predictions = rf_trained_model.predict(df.drop('DepartureDelay', axis=1))
+
+                    for i in selected_airport:
+                        st.subheader(f'Predicted Delay for {i} on {prediction_date}:')
+                        st.write(f'{predictions.mean():.0f} minutes')
 
 if __name__ == '__main__':
     main()
