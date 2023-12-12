@@ -138,8 +138,6 @@ def train_and_evaluate_model(regressor, X_train, X_test, y_train, y_test):
 
     y_pred = regressor.predict(X_test)
 
-    # sns.scatterplot(x=y_pred, y=y_test)
-
     # Evaluate the model
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
@@ -158,13 +156,11 @@ def make_predictions(regressor, X_test, y_test):
     # Display a scatter plot of predicted vs actual delays
     fig, ax = plt.subplots()
     sns.scatterplot(x=y_pred, y=y_test, ax=ax)
-
-    # Customize the plot
     ax.set_xlabel("Predicted Delays")
     ax.set_ylabel("Actual Delays")
-
     st.subheader("Predictions vs Actual Delays:")
     st.pyplot(fig)
+    st.write("This scatter plot juxtaposes predicted departure delays against actual delays. Each point represents an instance from our test dataset. The closer points align to the diagonal line, the more accurate our model's predictions, demonstrating its effectiveness in forecasting flight delays.")
 
 # Streamlit App
 def main():
@@ -243,6 +239,8 @@ def main():
 
                 st.subheader("Median Departure Delays Over Time for Each Airport:")
                 st.plotly_chart(fig)
+                st.write('This line chart illustrates the median departure delays over time for each airport. The x-axis represents the flight date, while the y-axis indicates the median departure delay in minutes. Each line corresponds to a different airport, providing a comprehensive view of how median delays fluctuate across various dates and airports.')
+                st.write("In the context of departure delays, the median is often preferred over the mean due to its robustness against extreme values or outliers. Departure delay data may occasionally contain outliers, such as unusually long delays caused by exceptional circumstances. These outliers can significantly impact the mean, making it less representative of the typical delay experience.")
 
                 mean_delays = df_X.groupby(['Flight_Date', 'DepartureAirport'])['DepartureDelay'].max().reset_index()
 
@@ -253,26 +251,27 @@ def main():
 
                 st.subheader("Maximum Departure Delays Over Time for Each Airport:")
                 st.plotly_chart(fig)
+                st.write('The plot visualizes the maximum departure delays for each airport on different dates. Unlike measures such as the median or mean, which provide insights into typical delay experiences, the maximum delay sheds light on the extreme situations where flights encounter unusually long delays. No one likes a 5-hour wait for their flight!')
 
     if selected_page == 'Prediction':
         st.sidebar.subheader("Input Controls for Prediction:")
         selected_airport = st.sidebar.multiselect("Select One Airport:", ['dxb', 'las', 'atl', 'dfw', 'ord'])
-        prediction_date = st.sidebar.date_input("Select Prediction Date:", pd.to_datetime('2023-11-10'))
+        prediction_date = st.sidebar.date_input("Select Prediction Date: (can be a future date!)", pd.to_datetime('2023-11-10'))
         hit_me_button2 = st.sidebar.button('Run Prediction')
         if hit_me_button2:
             with st.spinner('Running prediction...'):
                 current_datetime = datetime.now()
-                five_days_ago = current_datetime - timedelta(days=3)
-                six_days_ago = current_datetime - timedelta(days=4)
+                four_days_ago = current_datetime - timedelta(days=4)
+                five_days_ago = current_datetime - timedelta(days=5)
                 
-                df, df_X = load_and_preprocess_data(selected_airport, six_days_ago, five_days_ago)
+                df, df_X = load_and_preprocess_data(selected_airport, five_days_ago, four_days_ago)
                 rf = RandomForestRegressor()
                 X, y = df.drop('DepartureDelay', axis=1), df['DepartureDelay']
                 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
                 rf_trained_model, mse, mae, r2 = train_and_evaluate_model(rf, X_train, X_test, y_train, y_test)
                 predictions = rf_trained_model.predict(df.drop('DepartureDelay', axis=1))
                 for i in selected_airport:
-                    st.subheader(f'Delay predicted for {i}:')
+                    st.subheader(f'Delay predicted for {i} on {prediction_date}:')
                     st.write(f'{predictions.mean():.0f} minutes')
 
 
